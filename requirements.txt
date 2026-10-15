@@ -1,0 +1,13 @@
+antlr4-python3-runtime==4.9.3
+delta-spark==3.2.0
+importlib-metadata==9.0.1
+iniconfig==2.3.1
+omegaconf==2.3.0
+packaging==26.3
+pluggy==1.7.0
+py4j==0.10.9.7
+pyspark==3.5.3
+pytest==8.3.5
+pyyaml==6.0.3
+ruff==0.11.13
+zipp==4.1.1

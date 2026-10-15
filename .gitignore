@@ -1,0 +1,25 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Spark y Delta
+data/
+spark-warehouse/
+metastore_db/
+derby.log
+*.log
+
+# Entorno local
+.env
+.vscode/
+.idea/
+
+# Prueba de instalación
+test_spark.py
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
