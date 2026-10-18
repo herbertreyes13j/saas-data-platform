@@ -6,7 +6,14 @@ import sys
 
 from omegaconf import OmegaConf
 
-from saas_pipeline.config import load_config
+from saas_pipeline.config import VALID_TENANTS, load_config
+from delta import configure_spark_with_delta_pip
+from pyspark.sql import SparkSession
+
+from saas_pipeline.orchestrator import (
+    ingest_shared_catalog,
+    run_tenant,
+)
 
 
 def parse_args():
@@ -72,13 +79,90 @@ def main():
         print(OmegaConf.to_yaml(config))
         return 0
 
-    # La ejecución real se integrará en las siguientes fases.
-    print(
-        "Pipeline execution is not implemented yet. "
-        "Use --validate-only.",
-        file=sys.stderr,
+        # Por ahora, ejecutar un tenant a la vez.
+
+
+    builder = (
+        SparkSession.builder
+        .master("local[2]")
+        .appName("SAAS-Data-Pipeline")
+        .config(
+            "spark.sql.extensions",
+            "io.delta.sql.DeltaSparkSessionExtension",
+        )
+        .config(
+            "spark.sql.catalog.spark_catalog",
+            "org.apache.spark.sql.delta.catalog.DeltaCatalog",
+        )
     )
-    return 1
+
+    spark = None
+
+    try:
+        spark = configure_spark_with_delta_pip(
+            builder
+        ).getOrCreate()
+
+        spark.sparkContext.setLogLevel("ERROR")
+
+        # Cargar el catálogo compartido una sola vez.
+        ingest_shared_catalog(spark, config)
+
+        tenants = (
+            sorted(VALID_TENANTS)
+            if args.tenant == "all"
+            else [args.tenant]
+        )
+
+        failures = []
+
+        for tenant in tenants:
+            print(f"\n=== Processing tenant: {tenant} ===", flush=True)
+
+            try:
+                tenant_config = load_config(
+                    env=args.env,
+                    tenant=tenant,
+                    start_date=args.start_date,
+                    end_date=args.end_date,
+                )
+
+                result = run_tenant(
+                    spark,
+                    tenant_config,
+                    tenant,
+                )
+
+                print(f"Pipeline completed: {result}", flush=True)
+
+            except Exception as error:
+                print(
+                    f"Tenant {tenant} failed: {error}",
+                    file=sys.stderr,
+                )
+
+                failures.append(tenant)
+
+                if config.execution.fail_fast:
+                    print(
+                        "Stopping execution: fail_fast is enabled.",
+                        file=sys.stderr,
+                    )
+                    break
+
+        if failures:
+            print(f"Failed tenants: {failures}", file=sys.stderr)
+            return 1
+
+        return 0
+
+    except Exception as error:
+        print(f"Pipeline failed: {error}", file=sys.stderr)
+        return 1
+
+    finally:
+        if spark is not None:
+            spark.stop()
 
 
 if __name__ == "__main__":
