@@ -11,6 +11,7 @@ from pyspark.sql.types import (
     StringType,
     StructField,
     StructType,
+    DateType, BooleanType
 )
 
 
@@ -138,3 +139,39 @@ def ingest_deliveries(spark, config, tenant):
         "quarantine_records": quarantine_df.count(),
         "bronze_path": str(bronze_path),
     }
+
+MATERIALS_CATALOG_SCHEMA = StructType([
+    StructField("material", StringType(), True),
+    StructField("descripcion", StringType(), True),
+    StructField("categoria", StringType(), True),
+    StructField("precio_base", DecimalType(38, 18), True),
+    StructField("valid_from", DateType(), True),
+    StructField("valid_to", DateType(), True),
+    StructField("is_current", BooleanType(), True),
+])
+
+
+def ingest_materials(spark, raw_path, bronze_path):
+    """Ingiere el catálogo histórico de materiales hacia Bronze."""
+
+    raw_df = (
+        spark.read
+        .option("header", "true")
+        .schema(MATERIALS_CATALOG_SCHEMA)
+        .csv(raw_path)
+    )
+
+    bronze_df = (
+        raw_df
+        .withColumn("_ingestion_timestamp", F.current_timestamp())
+        .withColumn("_source_file", F.input_file_name())
+        .withColumn("_batch_id", F.lit(str(uuid4())))
+    )
+
+    (
+    bronze_df.write
+    .format("delta")
+    .mode("overwrite")
+    .option("overwriteSchema", "true")
+    .save(bronze_path)
+)
