@@ -50,3 +50,45 @@ el conjunto completo de datos de origen. Si la ingesta
 se vuelve incremental, será necesario utilizar una
 estrategia de MERGE o identificación de lotes para
 preservar el historial de cuarentena.
+
+## 3. Onboarding y registro de nuevos tenants
+
+**Observación:**
+La arquitectura busca facilitar la incorporación de nuevas unidades
+de negocio sin modificar el funcionamiento del pipeline.
+
+Actualmente, la implementación utiliza una lista explícita de
+tenants permitidos en config.py y en los argumentos de la CLI.
+
+Esto funciona para los seis países del alcance, pero incorporar
+uno nuevo también requiere modificar código.
+
+**Implementación:**
+Se mantuvo la lista explícita de tenants porque el alcance inicial
+es conocido y esta validación evita ejecutar accidentalmente
+países que todavía no han sido configurados.
+
+Cada tenant dispone de su propio archivo YAML y de rutas
+independientes para las capas de datos.
+
+**Propuesta de mejora:**
+En una siguiente iteración, los tenants podrían descubrirse
+desde los archivos disponibles en config/tenants/.
+
+El proceso de onboarding incluiría validación de configuración,
+pruebas de aislamiento y aprovisionamiento de infraestructura
+mediante Terraform.
+
+Esto permitiría incorporar nuevos tenants con menos cambios
+en el código de la aplicación.
+
+**Trade-off:**
+El registro explícito proporciona mayor control sobre cuáles
+tenants están habilitados y facilita validar el alcance actual.
+
+El descubrimiento dinámico reduce el mantenimiento manual,
+pero requiere controles adicionales para evitar habilitar
+tenants sin autorización o con configuraciones incompletas.
+
+Por ese motivo, se conserva la implementación actual como MVP
+y se propone automatizar el onboarding en una etapa posterior.
