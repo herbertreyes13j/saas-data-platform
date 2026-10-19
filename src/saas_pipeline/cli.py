@@ -2,6 +2,7 @@
 """Interfaz de línea de comandos del pipeline SAAS."""
 
 import argparse
+import os
 import sys
 
 from omegaconf import OmegaConf
@@ -82,26 +83,36 @@ def main():
         # Por ahora, ejecutar un tenant a la vez.
 
 
-    builder = (
-        SparkSession.builder
-        .master("local[2]")
-        .appName("SAAS-Data-Pipeline")
-        .config(
-            "spark.sql.extensions",
-            "io.delta.sql.DeltaSparkSessionExtension",
-        )
-        .config(
-            "spark.sql.catalog.spark_catalog",
-            "org.apache.spark.sql.delta.catalog.DeltaCatalog",
-        )
+    in_databricks = bool(
+        os.environ.get("DATABRICKS_RUNTIME_VERSION")
     )
+
+    if in_databricks:
+        builder = SparkSession.builder
+    else:
+        builder = (
+                SparkSession.builder
+                .master("local[2]")
+                .appName("SAAS-Data-Pipeline")
+            .config(
+                "spark.sql.extensions",
+                "io.delta.sql.DeltaSparkSessionExtension",
+            )
+            .config(
+                "spark.sql.catalog.spark_catalog",
+                "org.apache.spark.sql.delta.catalog.DeltaCatalog",
+            )
+        )
 
     spark = None
 
     try:
-        spark = configure_spark_with_delta_pip(
-            builder
-        ).getOrCreate()
+        if in_databricks:
+            spark = builder.getOrCreate()
+        else:
+            spark = configure_spark_with_delta_pip(
+                builder
+            ).getOrCreate()
 
         spark.sparkContext.setLogLevel("ERROR")
 

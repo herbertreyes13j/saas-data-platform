@@ -151,6 +151,11 @@ def validate_business_rules(df, catalog_df):
 
     unknown_material = F.col("_material_exists").isNull()
 
+    invalid_unit = ~F.coalesce(
+        F.col("unidad").isin("CS", "ST"),
+        F.lit(False),
+    )
+
     checked_df = (
         checked_df.withColumn(
             "_quarantine_reason",
@@ -159,6 +164,7 @@ def validate_business_rules(df, catalog_df):
                 F.when(invalid_quantity, "invalid_quantity"),
                 F.when(invalid_price, "null_price"),
                 F.when(unknown_material, "unknown_material"),
+                F.when(invalid_unit, "invalid_unit"),
             )
         )
         .drop("_material_exists")

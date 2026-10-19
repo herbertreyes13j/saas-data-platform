@@ -386,3 +386,41 @@ real de Databricks ni servicios productivos de Azure.
 El ejercicio de mentoring se mantiene independiente del
 pipeline principal para mostrar claramente los cambios
 aplicados sobre el código original del Anexo A.
+
+## 15. Instalación automatizada y compatibilidad
+
+### Instalación automatizada
+
+El proyecto incluye el script `scripts/setup.sh`, que permite
+crear el entorno virtual e instalar las dependencias.
+
+Desde la raíz del repositorio ejecutar:
+
+- `bash scripts/setup.sh`
+- `source .venv/bin/activate`
+
+Para ejecutar las pruebas de Spark localmente con Python 3.11,
+configurar las siguientes variables de entorno:
+
+- `export PYTHONPATH=src`
+- `export SPARK_LOCAL_IP=127.0.0.1`
+- `export PYSPARK_PYTHON="$(pwd)/.venv/bin/python"`
+- `export PYSPARK_DRIVER_PYTHON="$(pwd)/.venv/bin/python"`
+
+### Compatibilidad con Databricks
+
+La implementación fue desarrollada y probada con PySpark
+y Delta Lake en un entorno local.
+
+La CLI detecta `DATABRICKS_RUNTIME_VERSION` para utilizar
+la sesión Spark del entorno Databricks sin forzar `local[2]`.
+
+Para desplegar el proyecto en un workspace real todavía
+sería necesario adaptar las rutas locales al almacenamiento
+cloud, registrar las tablas en Unity Catalog y validar
+su ejecución sobre Databricks.
+
+El aprovisionamiento de infraestructura real queda fuera
+del alcance de este MVP, tal como se documenta en
+`docs/infra.md`.
+
