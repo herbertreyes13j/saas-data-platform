@@ -338,4 +338,3 @@ def merge_fact_deliveries(
             .partitionBy("fecha_proceso")
             .save(silver_path)
         )
-
