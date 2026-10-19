@@ -1,7 +1,7 @@
 """Transformaciones de negocio para la capa Silver."""
-
+from pyspark.sql import Window
 from pyspark.sql import functions as F
-
+from delta.tables import DeltaTable
 
 def normalize_units(df):
     """Convierte cantidades de CS y ST a unidades individuales."""
@@ -212,3 +212,129 @@ def save_prepared_silver(
     quarantine_df.write.format("delta").mode("overwrite").save(
         quarantine_path
     )
+
+MERGE_KEY = [
+    "_tenant_id",
+    "fecha_proceso",
+    "transporte",
+    "ruta",
+    "material",
+    "tipo_entrega",
+]
+
+
+def separate_merge_key_conflicts(df):
+    """Separa registros que comparten la clave del MERGE."""
+
+    window = Window.partitionBy(*MERGE_KEY)
+
+    checked_df = df.withColumn(
+        "_key_count",
+        F.count(F.lit(1)).over(window)
+    )
+
+    valid_df = (
+        checked_df
+        .filter(F.col("_key_count") == 1)
+        .drop("_key_count")
+    )
+
+    quarantine_df = (
+        checked_df
+        .filter(F.col("_key_count") > 1)
+        .drop("_key_count")
+        .withColumn(
+            "_quarantine_reason",
+            F.lit("duplicate_merge_key")
+        )
+    )
+
+    return valid_df, quarantine_df
+
+def separate_null_merge_keys(df):
+    """Separa registros con campos nulos en la clave de negocio."""
+
+    null_key = (
+        F.col("_tenant_id").isNull()
+        | F.col("fecha_proceso").isNull()
+        | F.col("transporte").isNull()
+        | F.col("ruta").isNull()
+        | F.col("material").isNull()
+        | F.col("tipo_entrega").isNull()
+    )
+
+    valid_df = df.filter(~null_key)
+
+    quarantine_df = (
+        df.filter(null_key)
+        .withColumn(
+            "_quarantine_reason",
+            F.lit("null_merge_key")
+        )
+    )
+
+    return valid_df, quarantine_df
+
+def apply_merge_key_checks(silver_df, quarantine_df):
+    """Valida las claves de negocio y consolida la cuarentena."""
+
+    non_null_df, null_keys_df = separate_null_merge_keys(
+        silver_df
+    )
+
+    unique_df, conflicts_df = separate_merge_key_conflicts(
+        non_null_df
+    )
+
+    all_quarantine_df = (
+        quarantine_df
+        .unionByName(null_keys_df, allowMissingColumns=True)
+        .unionByName(conflicts_df, allowMissingColumns=True)
+    )
+
+    return unique_df, all_quarantine_df
+
+
+def merge_fact_deliveries(
+    spark, fact_df, silver_path, tenant, start_date, end_date
+):
+    """Inserta o actualiza entregas usando su clave de negocio."""
+
+    if DeltaTable.isDeltaTable(spark, silver_path):
+
+        target = DeltaTable.forPath(spark, silver_path)
+
+        (
+            target.alias("target")
+            .merge(
+                fact_df.alias("source"),
+                """
+                target._tenant_id = source._tenant_id
+                AND target.fecha_proceso = source.fecha_proceso
+                AND target.transporte = source.transporte
+                AND target.ruta = source.ruta
+                AND target.material = source.material
+                AND target.tipo_entrega = source.tipo_entrega
+                """
+            )
+            .whenMatchedUpdateAll()
+            .whenNotMatchedInsertAll()
+            .whenNotMatchedBySourceDelete(
+            condition=(
+                f"target._tenant_id = '{tenant}' "
+                f"AND target.fecha_proceso BETWEEN "
+                f"'{start_date.replace('-', '')}' "
+                f"AND '{end_date.replace('-', '')}'"
+            )
+        )
+            .execute()
+        )
+
+    else:
+        (
+            fact_df.write
+            .format("delta")
+            .mode("errorifexists")
+            .partitionBy("fecha_proceso")
+            .save(silver_path)
+        )
