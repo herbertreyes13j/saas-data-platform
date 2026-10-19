@@ -59,3 +59,47 @@ def test_silver_business_transformations():
     finally:
         spark.stop()
 
+
+
+def test_unknown_units_go_to_quarantine():
+    """Verifica que las unidades inválidas no lleguen a Silver."""
+    spark = (
+        SparkSession.builder
+        .master("local[2]")
+        .appName("Test-Invalid-Units")
+        .getOrCreate()
+    )
+
+    try:
+        rows = [
+            ("GT", "20250312", 1, 101, "ZPRE", "MAT001", 5.0, 2.0, "ST"),
+            ("GT", "20250312", 2, 102, "ZPRE", "MAT001", 5.0, 2.0, "XX"),
+            ("GT", "20250312", 3, 103, "ZPRE", "MAT001", 5.0, 2.0, None),
+        ]
+
+        columns = [
+            "pais", "fecha_proceso", "transporte", "ruta",
+            "tipo_entrega", "material", "precio", "cantidad", "unidad",
+        ]
+
+        bronze_df = spark.createDataFrame(rows, columns)
+        catalog_df = spark.createDataFrame(
+            [("MAT001",)], ["material"]
+        )
+
+        valid_df, quarantine_df = transform_deliveries(
+            bronze_df, catalog_df
+        )
+
+        assert valid_df.count() == 1
+        assert quarantine_df.count() == 2
+
+        reasons = [
+            row["_quarantine_reason"]
+            for row in quarantine_df.collect()
+        ]
+
+        assert reasons == ["invalid_unit", "invalid_unit"]
+
+    finally:
+        spark.stop()
