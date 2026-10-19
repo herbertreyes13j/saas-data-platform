@@ -1,0 +1,68 @@
+name: Data Platform CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    name: Lint, YAML and Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    env:
+      PYTHONPATH: src
+      SPARK_LOCAL_IP: 127.0.0.1
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Validate Python with Ruff
+        run: ruff check src tests
+
+      - name: Validate YAML configuration
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          files = sorted(
+              list(Path("config").rglob("*.yaml"))
+              + list(Path("config").rglob("*.yml"))
+          )
+
+          assert files, "No YAML configuration files found"
+
+          for path in files:
+              with path.open(encoding="utf-8") as file:
+                  content = yaml.safe_load(file)
+
+              assert isinstance(content, dict), (
+                  f"Invalid YAML structure: {path}"
+              )
+
+              print(f"YAML OK: {path}")
+
+          print(f"Validated {len(files)} YAML files")
+          PY
+
+      - name: Run automated tests
+        run: python -m pytest -q

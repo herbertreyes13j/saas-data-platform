@@ -4,6 +4,15 @@ from pathlib import Path
 
 from pyspark.sql import functions as F
 
+from uuid import uuid4
+
+from saas_pipeline.quality import (
+    enforce_critical_quality,
+    evaluate_preparation_quality,
+    evaluate_silver_quality,
+)
+from saas_pipeline.quality_logs import save_quality_logs
+
 from saas_pipeline.bronze import ingest_deliveries, ingest_materials
 from saas_pipeline.silver import (
     apply_merge_key_checks,
@@ -15,6 +24,11 @@ from saas_pipeline.silver_materials import (
     merge_materials,
     prepare_materials,
     validate_material_history,
+)
+
+from saas_pipeline.gold import (
+    build_daily_metrics,
+    save_gold_metrics,
 )
 
 def ingest_shared_catalog(spark, config):
@@ -51,7 +65,7 @@ def run_tenant(spark, config, tenant):
     # 1. Ingestar fuentes en Bronze.
 
 
-    ingest_deliveries(spark, config, tenant)
+    bronze_result = ingest_deliveries(spark, config, tenant)
 
     # 2. Construir la dimensión histórica.
     materials_bronze_df = (
@@ -110,6 +124,38 @@ def run_tenant(spark, config, tenant):
         allowMissingColumns=True,
     )
 
+        # 6. Ejecutar y registrar controles de calidad.
+    run_id = str(uuid4())
+    batch_id = bronze_result["batch_id"]
+
+    critical_logs = evaluate_silver_quality(
+        fact_df,
+        run_id,
+        batch_id,
+        tenant,
+    )
+
+    audit_logs = evaluate_preparation_quality(
+        bronze_df,
+        quarantine_df,
+        run_id,
+        batch_id,
+        tenant,
+    )
+
+    all_logs = critical_logs + audit_logs
+
+    save_quality_logs(
+        spark,
+        all_logs,
+        config.paths.quality_logs,
+    )
+
+    enforce_critical_quality(
+        all_logs,
+        config.quality.fail_on_critical,
+    )
+
     # 6. Persistir la tabla de hechos.
     merge_fact_deliveries(
         spark,
@@ -139,6 +185,31 @@ def run_tenant(spark, config, tenant):
         )
         .partitionBy("fecha_proceso")
         .save(quarantine_path)
+    )
+
+        # 8. Construir Gold desde Silver persistida.
+    gold_source_df = (
+        spark.read
+        .format("delta")
+        .load(fact_path)
+        .filter(F.col("_tenant_id") == tenant)
+        .filter(F.col("fecha_proceso").between(start, end))
+    )
+
+    gold_df = build_daily_metrics(gold_source_df)
+
+    # 9. Guardar Gold con reprocesamiento parcial.
+    gold_path = str(
+        Path(config.paths.gold)
+        / tenant
+        / "daily_metrics_by_delivery_type"
+    )
+
+    save_gold_metrics(
+        gold_df,
+        gold_path,
+        config.execution.start_date,
+        config.execution.end_date,
     )
 
     return {

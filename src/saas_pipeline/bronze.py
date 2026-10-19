@@ -136,6 +136,7 @@ def ingest_deliveries(spark, config, tenant):
     return {
         "tenant": tenant,
         "bronze_records": bronze_df.count(),
+        "batch_id": batch_id,
         "quarantine_records": quarantine_df.count(),
         "bronze_path": str(bronze_path),
     }
